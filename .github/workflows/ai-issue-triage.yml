@@ -1,0 +1,182 @@
+name: AI Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get repo file tree
+        id: file_tree
+        run: |
+          # Grab a flat list of all doc files (limit depth to keep tokens sane)
+          TREE=$(find . -type f \( -name "*.md" -o -name "*.mdx" \) \
+            ! -path "*/node_modules/*" ! -path "*/.git/*" \
+            | sed 's|^\./||' | sort | head -300)
+          echo "tree<<EOF" >> $GITHUB_OUTPUT
+          echo "$TREE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Call Claude API
+        id: claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          FILE_TREE: ${{ steps.file_tree.outputs.tree }}
+        run: |
+          # Build the prompt
+          PROMPT=$(cat <<PROMPT
+          You are a documentation triage assistant for the Temporal documentation repository (temporalio/documentation).
+
+          A new GitHub issue has been filed. Your job is to produce a structured triage response.
+
+          ## Issue Details
+          - Number: #${ISSUE_NUMBER}
+          - Title: ${ISSUE_TITLE}
+          - Author: @${ISSUE_AUTHOR}
+          - Body:
+          ${ISSUE_BODY}
+
+          ## Repo File Tree (markdown/mdx files)
+          ${FILE_TREE}
+
+          ## Your Tasks
+          Respond in valid JSON only (no markdown fences, no preamble) with this exact structure:
+
+          {
+            "label": one of ["bug", "enhancement", "question", "broken-link", "content-improvement", "missing-content", "sdk-specific", "needs-triage"],
+            "affected_files": ["list of likely affected files from the tree above, best guesses if uncertain"],
+            "clarifying_questions": ["list any questions needed to fully resolve this issue, or empty array if none"],
+            "missing_info": ["list any info that would help resolve this, e.g. SDK version, OS, Temporal server version"],
+            "draft_fix_summary": "1-3 sentence plain English summary of what the fix or content change should be",
+            "draft_fix_content": "The actual markdown/mdx content to add or change. If it's a small fix write the full corrected text. If large, write a detailed outline with key points to cover.",
+            "readiness": one of ["ready-to-pr", "needs-more-info", "needs-discussion"],
+            "readiness_reason": "One sentence explaining the readiness status"
+          }
+          PROMPT
+          )
+
+          # Call Claude
+          RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "{
+              \"model\": \"claude-sonnet-4-20250514\",
+              \"max_tokens\": 2000,
+              \"messages\": [{
+                \"role\": \"user\",
+                \"content\": $(echo "$PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+              }]
+            }")
+
+          # Extract the text content from the response
+          CLAUDE_TEXT=$(echo "$RESPONSE" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          for block in data.get('content', []):
+              if block.get('type') == 'text':
+                  print(block['text'])
+                  break
+          ")
+
+          echo "claude_json<<EOF" >> $GITHUB_OUTPUT
+          echo "$CLAUDE_TEXT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Parse Claude response and apply label
+        id: parse
+        env:
+          CLAUDE_JSON: ${{ steps.claude.outputs.claude_json }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Parse fields
+          LABEL=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['label'])")
+          READINESS=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['readiness'])")
+          AFFECTED=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n'.join(['- ' + f for f in d['affected_files']]))")
+          CLARIFYING=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); qs=d['clarifying_questions']; print('\n'.join(['- ' + q for q in qs]) if qs else '_None — enough info to proceed._')")
+          MISSING=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); m=d['missing_info']; print('\n'.join(['- ' + i for i in m]) if m else '_None._')")
+          DRAFT_SUMMARY=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['draft_fix_summary'])")
+          DRAFT_CONTENT=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['draft_fix_content'])")
+          READINESS_REASON=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['readiness_reason'])")
+
+          # Determine readiness emoji
+          if [ "$READINESS" = "ready-to-pr" ]; then
+            READINESS_EMOJI="✅"
+          elif [ "$READINESS" = "needs-more-info" ]; then
+            READINESS_EMOJI="❓"
+          else
+            READINESS_EMOJI="💬"
+          fi
+
+          # Ensure label exists in repo (create if missing)
+          gh label create "$LABEL" --color "ededed" --repo "$REPO" 2>/dev/null || true
+
+          # Apply label
+          gh issue edit "$ISSUE_NUMBER" --add-label "$LABEL" --repo "$REPO"
+
+          # Build comment
+          COMMENT=$(cat <<COMMENT
+          ## 🤖 AI Triage Summary
+
+          > *Powered by Claude. A human should review before acting on this.*
+
+          ### 🏷️ Label
+          \`$LABEL\`
+
+          ### 📁 Likely Affected Files
+          $AFFECTED
+
+          ### 🔧 Draft Fix
+          $DRAFT_SUMMARY
+
+          <details>
+          <summary>See draft fix content</summary>
+
+          \`\`\`
+          $DRAFT_CONTENT
+          \`\`\`
+
+          </details>
+
+          ### ❓ Clarifying Questions
+          $CLARIFYING
+
+          ### 📋 Additional Info That Would Help
+          $MISSING
+
+          ---
+
+          ### $READINESS_EMOJI Readiness: \`$READINESS\`
+          $READINESS_REASON
+
+          ---
+
+          **Want me to open a draft PR with the fix above?**
+          React with 👍 on this comment or reply \`/create-pr\` and a workflow will scaffold the branch and draft PR for you.
+          COMMENT
+          )
+
+          # Post comment
+          gh issue comment "$ISSUE_NUMBER" --body "$COMMENT" --repo "$REPO"
+
+      - name: Watch for /create-pr trigger
+        # This is handled by a separate workflow (see ai-create-pr.yml)
+        run: echo "PR creation is handled by the issue_comment workflow."

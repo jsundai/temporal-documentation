@@ -1,0 +1,181 @@
+name: AI Create Draft PR
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-pr:
+    # Only run when someone comments /create-pr on an issue (not a PR)
+    if: |
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '/create-pr')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Find triage comment
+        id: triage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Grab the most recent AI triage comment body
+          TRIAGE_BODY=$(gh issue view "$ISSUE_NUMBER" \
+            --repo "$REPO" \
+            --comments \
+            --json comments \
+            --jq '[.comments[] | select(.body | contains("AI Triage Summary"))] | last | .body')
+
+          echo "triage_body<<EOF" >> $GITHUB_OUTPUT
+          echo "$TRIAGE_BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Call Claude to generate file edits
+        id: claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          TRIAGE: ${{ steps.triage.outputs.triage_body }}
+        run: |
+          # Read each affected file's content and build a payload
+          AFFECTED_FILES=$(echo "$TRIAGE" | grep -oP '(?<=- )[\w/.\-]+\.(md|mdx)' | head -5)
+
+          FILE_CONTENTS=""
+          for f in $AFFECTED_FILES; do
+            if [ -f "$f" ]; then
+              CONTENT=$(head -150 "$f")  # first 150 lines to stay within token budget
+              FILE_CONTENTS="${FILE_CONTENTS}\n\n### File: $f\n\`\`\`\n${CONTENT}\n\`\`\`"
+            fi
+          done
+
+          PROMPT=$(cat <<PROMPT
+          You are a documentation engineer for the Temporal documentation repo.
+
+          ## Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+          ${ISSUE_BODY}
+
+          ## Triage Summary (from prior AI analysis)
+          ${TRIAGE}
+
+          ## Current File Contents
+          ${FILE_CONTENTS}
+
+          ## Task
+          Produce the minimal file edits needed to resolve this issue.
+          Respond in valid JSON only (no markdown fences) with this structure:
+
+          {
+            "branch_name": "fix/issue-${ISSUE_NUMBER}-short-slug",
+            "pr_title": "Short PR title",
+            "pr_body": "Markdown PR description referencing the issue and explaining changes",
+            "edits": [
+              {
+                "file": "relative/path/to/file.md",
+                "action": "modify",
+                "search": "exact text to find and replace (a few lines of context)",
+                "replace": "new text to replace it with"
+              }
+            ]
+          }
+
+          Use "action": "create" with a "content" field instead of search/replace for new files.
+          PROMPT
+          )
+
+          RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "{
+              \"model\": \"claude-sonnet-4-20250514\",
+              \"max_tokens\": 3000,
+              \"messages\": [{
+                \"role\": \"user\",
+                \"content\": $(echo "$PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+              }]
+            }")
+
+          CLAUDE_TEXT=$(echo "$RESPONSE" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          for block in data.get('content', []):
+              if block.get('type') == 'text':
+                  print(block['text'])
+                  break
+          ")
+
+          echo "claude_json<<EOF" >> $GITHUB_OUTPUT
+          echo "$CLAUDE_TEXT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Apply edits and open draft PR
+        env:
+          CLAUDE_JSON: ${{ steps.claude.outputs.claude_json }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          BRANCH=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['branch_name'])")
+          PR_TITLE=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['pr_title'])")
+          PR_BODY=$(echo "$CLAUDE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['pr_body'])")
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+          # Apply each edit
+          python3 <<PYEOF
+          import json, os, sys
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as _:
+              pass  # just ensure it exists
+
+          data = json.loads(os.environ['CLAUDE_JSON'])
+          for edit in data.get('edits', []):
+              path = edit['file']
+              action = edit.get('action', 'modify')
+              os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
+              if action == 'create':
+                  with open(path, 'w') as f:
+                      f.write(edit['content'])
+                  print(f"Created {path}")
+              elif action == 'modify':
+                  with open(path, 'r') as f:
+                      content = f.read()
+                  new_content = content.replace(edit['search'], edit['replace'], 1)
+                  if new_content == content:
+                      print(f"WARNING: search text not found in {path}")
+                  else:
+                      with open(path, 'w') as f:
+                          f.write(new_content)
+                      print(f"Modified {path}")
+          PYEOF
+
+          git add -A
+          git commit -m "$PR_TITLE (closes #$ISSUE_NUMBER)"
+          git push origin "$BRANCH"
+
+          # Open draft PR
+          gh pr create \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY
+
+          Closes #$ISSUE_NUMBER
+          > ⚠️ This is an AI-generated draft PR. Please review all changes carefully before merging." \
+            --draft \
+            --repo "$REPO"
+
+          # Reply on the issue
+          gh issue comment "$ISSUE_NUMBER" \
+            --body "🚀 Draft PR created on branch \`$BRANCH\` — please review before merging!" \
+            --repo "$REPO"
