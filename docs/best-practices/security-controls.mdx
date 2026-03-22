@@ -37,11 +37,11 @@ Strong identity management in Temporal Cloud is crucial for ensuring secure acce
 
 #### 1. Enable [SAML Single Sign-on](https://docs.temporal.io/cloud/saml) (SSO) for User Access
 
-Integrate Temporal Cloud with your organization's identity provider via SAML 2.0 for centralized authentication. SSO allows you to enforce your corporate login policies (MFA, password complexity, etc.). When you configure SAML with Temporal Cloud, you can disable social logins (i.e. Microsoft, Google) by opening a support ticket. 
+Integrate Temporal Cloud with your organization's identity provider via SAML 2.0 for centralized authentication. SSO allows you to enforce your corporate login policies (MFA, password complexity, etc.). When you configure SAML with Temporal Cloud, you can disable social logins (i.e., Microsoft, Google) by opening a support ticket. 
 
 #### 2. Use Least-Privilege Roles for Temporal Cloud Users
 
-Temporal Cloud provides [preconfigured account-level roles](https://docs.temporal.io/cloud/users) (Account Owner, Finance Admin, Global Admin, Developer, Read-Only) and Namespace-level permissions. Assign users the lowest level of access they need. For example, give developers access only to the Namespaces they work on, and use read-only roles for auditors or reviewers. Regularly review user roles and remove or downgrade accounts that are no longer needed
+Temporal Cloud provides [preconfigured account-level roles](https://docs.temporal.io/cloud/users) (Account Owner, Finance Admin, Global Admin, Developer, Read-Only) and Namespace-level permissions. Assign users the lowest level of access they need. For example, give developers access only to the Namespaces they work on, and use read-only roles for auditors or reviewers. Regularly review user roles and remove or downgrade accounts that are no longer needed.
 
 #### 3. Leverage SCIM or Automated User Provisioning
 
@@ -80,7 +80,7 @@ Temporal Cloud API keys are an alternative to mTLS for authentication of SDKs, C
 
 ## Network Configuration and Isolation
 
-Although Temporal Cloud is a SaaS offering, you retain control over its networking configurations, allowing for tailored security measures. By minimizing public internet exposure and segmenting Temporal workflows into suitable network zones, you can significantly bolster security and reduce potential vulnerabilities. This approach ensures that your workflows are isolated and protected within your defined network boundaries, even while leveraging the benefits of a cloud-based service. 
+Although Temporal Cloud is a SaaS offering, you retain control over its networking configurations, allowing for tailored security measures. By minimizing public internet exposure and segmenting Temporal Workflows into suitable network zones, you can significantly bolster security and reduce potential vulnerabilities. This approach ensures that your Workflows are isolated and protected within your defined network boundaries, even while leveraging the benefits of a cloud-based service. 
 
 ### Best Practices:
 
@@ -90,9 +90,9 @@ Temporal Cloud supports private connectivity options such as [AWS PrivateLink](h
 
 #### 2. Separate environments by Namespace
 
-Use [Temporal Namespaces](https://learn.temporal.io/best_practice_guides/managing_a_namespace/#2-use-domain-service-and-environment-to-name-namespaces) to isolate workflows for different environments or teams (e.g. development, staging, production). Each Namespace is logically segregated and cannot interact with others by default, providing a security boundary. 
+Use [Temporal Namespaces](https://learn.temporal.io/best_practice_guides/managing_a_namespace/#2-use-domain-service-and-environment-to-name-namespaces) to isolate Workflows for different environments or teams (e.g. development, staging, production). Each Namespace is logically segregated and cannot interact with others by default, providing a security boundary. 
 
-Ensure that your production Namespace uses stricter network controls (e.g. only accessible from the prod network) and that credentials for it are separate from non-prod Namespaces. This limits the impact of any compromise in a lower environment, and as workflow data is only visible to users with access to that Namespace, separating environments by Namespace also enforces data-visibility boundaries.
+Ensure that your production Namespace uses stricter network controls (e.g. only accessible from the prod network) and that credentials for it are separate from non-prod Namespaces. This limits the impact of any compromise in a lower environment, and as Workflow data is only visible to users with access to that Namespace, separating environments by Namespace also enforces data-visibility boundaries.
 
 ## Data Protection and Encryption
 
@@ -123,22 +123,22 @@ Temporal Cloud’s platform is engineered for fault-tolerance out of the box, bu
 | Namespace scope | Use Case | Uptime SLA | Recovery Time Objective (RTO) | Recovery Point Objective (RPO) |
 |-----------------|----------|------------|--------------------------------|--------------------------------|
 | **Single-Region** | **If your application is built for one region and does not have stringent high-availability or disaster recovery requirements.** | 99.9% | ≤ 8 hours | ≤ 8 hours |
-| **Same-Region Replication** | **If you want higher availability but your application is designed for a single region or if cross region latency doesn’t meet SLAs for application** | 99.99% | ≤ 20 minutes | Near-zero (≈ seconds) |
-| **Multi-Region Replication** | **If a disruption of your workflow will cause loss of revenue, poor end-user experience, or issues with regulatory compliance.** | 99.99% | ≤ 20 minutes | Near-zero (≈ seconds) |
+| **Same-Region Replication** | **If you want higher availability but your application is designed for a single region or if cross-region latency doesn’t meet SLAs for application** | 99.99% | ≤ 20 minutes | Near-zero (≈ seconds) |
+| **Multi-Region Replication** | **If a disruption of your Workflow will cause loss of revenue, poor end-user experience, or issues with regulatory compliance.** | 99.99% | ≤ 20 minutes | Near-zero (≈ seconds) |
 | **Multi-Cloud Replication** | **If you need the highest level of disaster tolerance, protecting against outages of an entire cloud provider (e.g., AWS or GCP)** | 99.99% | ≤ 20 minutes | Near-zero (≈ seconds) |
 
 ### Best Practices:
 
 #### 1. Identify Availability-sensitive Namespaces
 
-Run a business-impact analysis to flag workflows where a regional outage would cause significant customer, revenue, or safety impact. Identify Namespaces that are availability-sensitive where a regional outage may have outsized business impacts such as revenue loss, poor customer experience, or inability to meet legal obligations.
+Run a business-impact analysis to flag Workflows where a regional outage would cause significant customer, revenue, or safety impact. Identify Namespaces that are availability-sensitive where a regional outage may have outsized business impacts such as revenue loss, poor customer experience, or inability to meet legal obligations.
 
 #### 2. Enable High Availability for business critical use cases
 
 For many organizations, ensuring High Availability (HA) is required because of strict uptime requirements, compliance, and regulatory needs. 
 
-For these critical use cases, enable High Availability features for specific namespaces for a [99.99% contractual SLA](https://docs.temporal.io/cloud/high-availability#high-availability-features). When choosing between [same-region, multi-region, and multi-cloud replication](https://docs.temporal.io/cloud/high-availability), it is recommended to use multi-region/multi-cloud replication to distribute your dependencies across regions. Using physically separated regions improves the fault tolerance of your application.
+For these critical use cases, enable High Availability features for specific Namespaces for a [99.99% contractual SLA](https://docs.temporal.io/cloud/high-availability#high-availability-features). When choosing between [same-region, multi-region, and multi-cloud replication](https://docs.temporal.io/cloud/high-availability), it is recommended to use multi-region/multi-cloud replication to distribute your dependencies across regions. Using physically separated regions improves the fault tolerance of your application.
 
-By default, Temporal Cloud provides a [99.9% contractual SLA guarantee](https://docs.temporal.io/cloud/high-availability) against service errors for all namespaces. 
+By default, Temporal Cloud provides a [99.9% contractual SLA guarantee](https://docs.temporal.io/cloud/high-availability) against service errors for all Namespaces. 
 
-Note: [enabling HA features for namespaces will 2x the consumption cost.](https://docs.temporal.io/cloud/pricing#high-availability-features)
+Note: [enabling HA features for Namespaces will 2x the consumption cost.](https://docs.temporal.io/cloud/pricing#high-availability-features)
