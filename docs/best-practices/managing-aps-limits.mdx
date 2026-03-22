@@ -108,7 +108,7 @@ Consider an order fulfillment Workflow that spawns Child Workflows for payment p
 Each Child Workflow goes through its full action lifecycle (start, tasks, activities, completion), and all of those actions count toward the APS limits on your Namespace. 
 
 This pattern appears frequently in:
-- Batch processing: A parent workflow processes a file with 1,000 records, spawning a Child Workflow for each record. Batch processing is also often bursty whenever the batch begins.
+- Batch processing: A parent Workflow processes a file with 1,000 records, spawning a Child Workflow for each record. Batch processing is also often bursty whenever the batch begins.
 - Map-reduce patterns: Data processing Workflows that fan out to process partitions in parallel, then aggregate results.
 
 This challenge additionally compounds when you have multiple levels of nesting--parent Workflows that create children, which create their own children. 
@@ -154,8 +154,8 @@ There are some design patterns that can lead to high APS that are consistent acr
 
 Consider two approaches to processing 1,000 records:
 
-- Approach A: Create a Workflow that spawns 1,000 separate activities, one per record.
-- Approach B: Create a Workflow that spawns 10 activities, each processing 100 records in a batch.
+- Approach A: Create a Workflow that spawns 1,000 separate Activities, one per record.
+- Approach B: Create a Workflow that spawns 10 Activities, each processing 100 records in a batch.
 
 Approach B will clearly result in less APS. 
 This is a simple example, but this pattern shows up everywhere: processing individual transactions versus batches, sending individual notifications versus bulk operations, or making separate API calls versus batch endpoints. 
