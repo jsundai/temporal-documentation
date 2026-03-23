@@ -6,6 +6,11 @@
   },
   "redirects": [
     {
+      "source": "/tutorials/:path*",
+      "destination": "https://learn.temporal.io/tutorials/:path*",
+      "permanent": true
+    },
+    {
       "source": "/cloud/introduction",
       "destination": "/cloud/overview",
       "permanent": true
